@@ -11,7 +11,8 @@ import (
 const gridSizeX int = 100
 const gridSizeY int = 30
 const userChar byte = 'A'
-const backgroundChar byte = '.'
+const emptyChar byte = '.'
+const targetChar byte = '@'
 const updateTimems = 100
 
 const (
@@ -32,7 +33,7 @@ func initialModel() model {
 	var grid [gridSizeY][gridSizeX]byte
 	for i := 0; i < gridSizeY; i++ {
 		for j := 0; j < gridSizeX; j++ {
-			grid[i][j] = backgroundChar
+			grid[i][j] = emptyChar
 		}
 	}
 	return model{
@@ -64,36 +65,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Cool, what was the actual key pressed?
 		switch msg.String() {
+
 		// These keys should exit the program.
 		case "ctrl+c", "q":
 			return m, tea.Quit
+
 		// capture movement key presses
 		case upKey, downKey, leftKey, rightKey:
 			m.latestMove = msg.String()
 		}
+
 	case readyMessageType:
-		switch m.latestMove {
-		case upKey:
-			if m.userLocation[0] > 0 {
-				m.userLocation[0] -= 1
-			}
-		case downKey:
-			if m.userLocation[0] < gridSizeY-1 {
-				m.userLocation[0] += 1
-			}
-		case leftKey:
-			if m.userLocation[1] > 0 {
-				m.userLocation[1] -= 1
-			}
-		case rightKey:
-			if m.userLocation[1] < gridSizeX-1 {
-				m.userLocation[1] += 1
-			}
-		}
-		m.latestMove = nilKey
+		// make a move and restart the ticker
+		m.handleMove()
 		return m, ticker
 	}
 	return m, nil
+}
+
+func (m *model) handleMove() {
+	switch m.latestMove {
+	case upKey:
+		if m.userLocation[0] > 0 {
+			m.userLocation[0] -= 1
+		}
+	case downKey:
+		if m.userLocation[0] < gridSizeY-1 {
+			m.userLocation[0] += 1
+		}
+	case leftKey:
+		if m.userLocation[1] > 0 {
+			m.userLocation[1] -= 1
+		}
+	case rightKey:
+		if m.userLocation[1] < gridSizeX-1 {
+			m.userLocation[1] += 1
+		}
+	}
+	m.latestMove = nilKey
 }
 
 func (m model) View() string {
