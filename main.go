@@ -5,56 +5,42 @@ import (
 	"os"
 	"time"
 
+	"github.com/charlie-pecora/bubbles/levels"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const gridSizeX int = 100
-const gridSizeY int = 30
-const userChar byte = 'A'
-const emptyChar byte = '.'
-const targetChar byte = '@'
-const updateTimems = 100
+const updateTimeMs = 10
+const nextLevelTimeMs = 1000
 
-const (
-	nilKey   string = ""
-	upKey    string = "k"
-	downKey  string = "j"
-	leftKey  string = "h"
-	rightKey string = "l"
-)
+func ticker() tea.Msg {
+	time.Sleep(time.Millisecond * updateTimeMs)
+	return levels.TickMessage
+}
+
+func resetTicker() tea.Msg {
+	time.Sleep(time.Millisecond * nextLevelTimeMs)
+	return levels.ResetMessage
+}
 
 type model struct {
-	grid         [gridSizeY][gridSizeX]byte
-	userLocation [2]int
-	latestMove   string
+	userLocation   levels.Coordinates
+	TargetLocation levels.Coordinates
+	walls          []levels.Coordinates
+	userMove       levels.MoveValue
+	level          int
+	gameWon        bool
 }
 
 func initialModel() model {
-	var grid [gridSizeY][gridSizeX]byte
-	for i := 0; i < gridSizeY; i++ {
-		for j := 0; j < gridSizeX; j++ {
-			grid[i][j] = emptyChar
-		}
-	}
 	return model{
-		grid:         grid,
-		userLocation: [2]int{5, 5},
-		latestMove:   nilKey,
+		userLocation: levels.Coordinates{X: 5, Y: 5},
+		userMove:     levels.NilKey,
 	}
 }
 
 func (m model) Init() tea.Cmd {
 	// Just return `nil`, which means "no I/O right now, please."
 	return ticker
-}
-
-type readyMessageType string
-
-const readyMessage readyMessageType = "Ready"
-
-func ticker() tea.Msg {
-	time.Sleep(time.Millisecond * updateTimems)
-	return readyMessage
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -64,61 +50,97 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 
 		// Cool, what was the actual key pressed?
-		switch msg.String() {
+		switch s := levels.MoveValue(msg.String()); s {
 
 		// These keys should exit the program.
 		case "ctrl+c", "q":
 			return m, tea.Quit
 
-		// capture movement key presses
-		case upKey, downKey, leftKey, rightKey:
-			m.latestMove = msg.String()
+		case levels.UpKey, levels.DownKey, levels.LeftKey, levels.RightKey:
+			m.userMove = s
 		}
 
-	case readyMessageType:
-		// make a move and restart the ticker
-		m.handleMove()
-		return m, ticker
+	case levels.ReadyMessageType:
+		switch msg {
+		case levels.TickMessage:
+			// make a move and restart the ticker
+			m.HandleMove()
+			if m.LevelCompleted() {
+				return m, resetTicker
+			} else {
+				return m, ticker
+			}
+		case levels.ResetMessage:
+			m.NextLevel()
+			return m, ticker
+		}
 	}
 	return m, nil
 }
 
-func (m *model) handleMove() {
-	switch m.latestMove {
-	case upKey:
-		if m.userLocation[0] > 0 {
-			m.userLocation[0] -= 1
+func (m *model) HandleMove() {
+	switch m.userMove {
+	case levels.UpKey:
+		if m.userLocation.Y > 0 {
+			m.userLocation.Y -= 1
 		}
-	case downKey:
-		if m.userLocation[0] < gridSizeY-1 {
-			m.userLocation[0] += 1
+	case levels.DownKey:
+		if m.userLocation.Y < levels.GridSizeY-1 {
+			m.userLocation.Y += 1
 		}
-	case leftKey:
-		if m.userLocation[1] > 0 {
-			m.userLocation[1] -= 1
+	case levels.LeftKey:
+		if m.userLocation.X > 0 {
+			m.userLocation.X -= 1
 		}
-	case rightKey:
-		if m.userLocation[1] < gridSizeX-1 {
-			m.userLocation[1] += 1
+	case levels.RightKey:
+		if m.userLocation.X < levels.GridSizeX-1 {
+			m.userLocation.X += 1
 		}
 	}
-	m.latestMove = nilKey
+	m.userMove = levels.NilKey
+}
+
+func (m model) LevelCompleted() bool {
+	return m.userLocation == m.TargetLocation
+}
+
+func (m *model) NextLevel() {
+	m.level += 1
+	if m.level >= len(levels.LevelsArray) {
+		m.gameWon = true
+	} else {
+		nextLevel := levels.LevelsArray[m.level]
+		m.TargetLocation = nextLevel.TargetLocation
+		m.walls = nextLevel.Walls
+	}
 }
 
 func (m model) View() string {
 	// The header
 	s := "Grug Game\n\n"
+	if m.gameWon {
+		s += "You Win!!!!"
+	} else if m.LevelCompleted() {
+		s += fmt.Sprintf("You beat level %v!", m.level)
+	} else {
 
-	for i, row := range m.grid {
-		rowString := row[:]
-		if m.userLocation[0] == i {
-			rowString[m.userLocation[1]] = userChar
+		for yi := 0; yi < levels.GridSizeY; yi++ {
+			rowString := make([]byte, 0, levels.GridSizeX)
+			for xi := 0; xi < levels.GridSizeX; xi++ {
+				switch (levels.Coordinates{X: xi, Y: yi}) {
+				case m.userLocation:
+					rowString = append(rowString, levels.UserChar)
+				case m.TargetLocation:
+					rowString = append(rowString, levels.TargetChar)
+				default:
+					rowString = append(rowString, levels.EmptyChar)
+				}
+			}
+			s += string(rowString) + "\n"
 		}
-		s += string(rowString) + "\n"
 	}
-
-	// The footer
-	s += "\nPress q to quit.\n"
+		// The footer
+	s += "\\nnPress q or ctrl+c to quit.\n"
 
 	// Send the UI for rendering
 	return s
