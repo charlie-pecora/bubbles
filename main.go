@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/charlie-pecora/bubbles/levels"
@@ -10,6 +11,7 @@ import (
 )
 
 const updateTimeMs = 10
+const ticketPerLevelUpdate = 50
 const nextLevelTimeMs = 1000
 
 func ticker() tea.Msg {
@@ -23,28 +25,35 @@ func resetTicker() tea.Msg {
 }
 
 type model struct {
-	userLocation   levels.Coordinates
-	TargetLocation levels.Coordinates
-	walls          []levels.Coordinates
-	userMove       levels.MoveValue
-	level          int
-	gameWon        bool
+	userLocation  levels.Coordinates
+	level         levels.Level
+	userMove      levels.MoveValue
+	gameWon       bool
+	gameLost      bool
+	displayWidth  int
+	displayHeight int
+	counter       int
 }
 
 func initialModel() model {
+	level, _ := levels.GetLevel(0)
 	return model{
 		userLocation: levels.Coordinates{X: 5, Y: 5},
 		userMove:     levels.NilKey,
+		level:        level,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	// Just return `nil`, which means "no I/O right now, please."
 	return ticker
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.displayHeight = msg.Height
+		m.displayWidth = msg.Width
 
 	// Is it a key press?
 	case tea.KeyMsg:
@@ -56,6 +65,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 
+		// Restart the game if you have won
+		case "enter":
+			if m.gameLost || m.gameWon {
+				m = initialModel()
+				return m, ticker
+			}
+
 		case levels.UpKey, levels.DownKey, levels.LeftKey, levels.RightKey:
 			m.userMove = s
 		}
@@ -65,7 +81,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case levels.TickMessage:
 			// make a move and restart the ticker
 			m.HandleMove()
-			if m.LevelCompleted() {
+			m.counter += 1
+			if m.counter%ticketPerLevelUpdate == 0 {
+				m.counter = 0
+				m.level.Update()
+			}
+			m.level.Update()
+			if m.CheckLost() {
+				m.gameLost = true
+				return m, nil
+			} else if m.LevelCompleted() {
 				return m, resetTicker
 			} else {
 				return m, ticker
@@ -100,47 +125,54 @@ func (m *model) HandleMove() {
 	m.userMove = levels.NilKey
 }
 
+func (m model) CheckLost() bool {
+	return slices.Contains(m.level.Enemies, m.userLocation)
+}
+
 func (m model) LevelCompleted() bool {
-	return m.userLocation == m.TargetLocation
+	return m.userLocation == m.level.TargetLocation
 }
 
 func (m *model) NextLevel() {
-	m.level += 1
-	if m.level >= len(levels.LevelsArray) {
+	nextLevel, ok := levels.GetLevel(m.level.Number + 1)
+	if !ok {
 		m.gameWon = true
 	} else {
-		nextLevel := levels.LevelsArray[m.level]
-		m.TargetLocation = nextLevel.TargetLocation
-		m.walls = nextLevel.Walls
+		m.level = nextLevel
 	}
 }
 
 func (m model) View() string {
 	// The header
 	s := "Grug Game\n\n"
-	if m.gameWon {
-		s += "You Win!!!!"
+	s += fmt.Sprintf("(%v, %v)\n", m.displayHeight, m.displayWidth)
+	if m.gameLost {
+		s += "You Lose!!!!\n\nPress enter to play again!"
+	} else if m.gameWon {
+		s += "You Win!!!!\n\nPress enter to play again!"
 	} else if m.LevelCompleted() {
-		s += fmt.Sprintf("You beat level %v!", m.level)
+		s += fmt.Sprintf("You beat level %v!", m.level.Number)
 	} else {
 
 		for yi := 0; yi < levels.GridSizeY; yi++ {
 			rowString := make([]byte, 0, levels.GridSizeX)
 			for xi := 0; xi < levels.GridSizeX; xi++ {
-				switch (levels.Coordinates{X: xi, Y: yi}) {
-				case m.userLocation:
+				current := levels.Coordinates{X: xi, Y: yi}
+				if slices.Contains(m.level.Enemies, current) {
+					rowString = append(rowString, levels.EnemyChar)
+				} else if current == m.userLocation {
 					rowString = append(rowString, levels.UserChar)
-				case m.TargetLocation:
+				} else if current == m.level.TargetLocation {
 					rowString = append(rowString, levels.TargetChar)
-				default:
+				} else {
 					rowString = append(rowString, levels.EmptyChar)
 				}
 			}
 			s += string(rowString) + "\n"
 		}
 	}
-		// The footer
-	s += "\\nnPress q or ctrl+c to quit.\n"
+	// The footer
+	s += "\n\nPress q or ctrl+c to quit.\n"
 
 	// Send the UI for rendering
 	return s
